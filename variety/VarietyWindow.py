@@ -1434,7 +1434,7 @@ class VarietyWindow(Gtk.Window):
             
         logger.info(lambda: "Colors: " + str(rgb_color))
             
-        conky_config_path = '~/.config/conky/'
+        conky_config_path = '~/.config/variety/'
         
         # write the colors to a file
         # with open(conky_config_path+'colors.txt', 'w') as f:
@@ -1476,7 +1476,7 @@ class VarietyWindow(Gtk.Window):
             return os.path.isfile(filepath)
 
         def download_and_convert(svgfile):
-            script_path = os.path.expanduser("~/.config/conky/")
+            script_path = os.path.expanduser("~/.config/variety/")
             svg_exist = os.path.join(script_path, 'WeatherIcons/msn/fallback/', f'{svgfile}.svg')
 
             if not file_exists(svg_exist):
