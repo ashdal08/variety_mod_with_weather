@@ -32,6 +32,7 @@ from typing import List
 from PIL import Image as PILImage
 
 from jumble.Jumble import Jumble
+import requests
 from variety import indicator
 from variety.AboutVarietyDialog import AboutVarietyDialog
 from variety.DominantColors import DominantColors
@@ -78,7 +79,10 @@ logger = logging.getLogger("variety")
 
 DL_FOLDER_FILE = ".variety_download_folder"
 
-DONATE_URL = "https://www.paypal.com/donate/?business=DHQUELMQRQW46&no_recurring=0&item_name=Variety+Wallpaper+Changer&currency_code=EUR"
+DONATE_URL = (
+    "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=DHQUELMQRQW46&lc=BG&item_name="
+    "Variety%20Wallpaper%20Changer&currency_code=EUR&bn=PP%2dDonationsBF%3abtn_donate_SM%2egif%3aNonHosted"
+)
 
 OUTDATED_MSG = "This version of Variety is outdated and unsupported. Please upgrade. Quitting."
 
@@ -86,7 +90,7 @@ OUTDATED_MSG = "This version of Variety is outdated and unsupported. Please upgr
 class VarietyWindow(Gtk.Window):
     __gtype_name__ = "VarietyWindow"
 
-    SERVERSIDE_OPTIONS_URL = "https://gist.githubusercontent.com/peterlevi/a7d1dbf3a4e76e15760a/raw/fab10d0ce5cfe66377e7c650be56edb497aabbd4/variety_server_options.json"
+    SERVERSIDE_OPTIONS_URL = "http://tiny.cc/variety-options-063"
 
     # How many unseen_downloads max to for every downloader.
     MAX_UNSEEN_PER_DOWNLOADER = 10
@@ -578,11 +582,6 @@ class VarietyWindow(Gtk.Window):
         if (
             self.previous_options.min_rating_enabled != self.options.min_rating_enabled
             or self.previous_options.min_rating != self.options.min_rating
-        ):
-            return True
-        if (
-            self.previous_options.name_regex_enabled != self.options.name_regex_enabled
-            or self.previous_options.name_regex != self.options.name_regex
         ):
             return True
         return False
@@ -1088,9 +1087,6 @@ class VarietyWindow(Gtk.Window):
                 if self.preferences_dialog:
                     self.preferences_dialog.update_status_message()
 
-                if varietyconfig.get_version() in self.server_options.get("outdated_versions", []):
-                    self.show_notification("Version unsupported", OUTDATED_MSG)
-                    self.on_quit()
             except Exception:
                 logger.exception(lambda: "Could not fetch Variety serverside options")
                 if attempts < 5:
@@ -1283,19 +1279,243 @@ class VarietyWindow(Gtk.Window):
             return None
 
         w, h = Util.get_primary_display_size()
+        
+        # cmd = "convert %s -scale %dx%d^ " % (shlex.quote(filename), w, h)
         cmd = "convert %s -scale %dx%d^ " % (shlex.quote(filename), w, h)
+        
+        
+        # # ****************************************by ASHLEY
+        from colorthief import ColorThief
+        
+        # Initialize ColorThief with the image
+        color_thief = ColorThief(filename)
+        
+        # Get the top 5 dominant colors from the image
+        dominant_colors = color_thief.get_palette(color_count=20, quality=3)
+
+        light1 = dominant_colors[0]
+        dark1 = dominant_colors[0]
+        
+        def thief_lightness(color):
+            """
+            Calculate the luminance of an RGB color.
+            
+            Args:
+                color (tuple): RGB color as (R, G, B).
+                
+            Returns:
+                float: Luminance of the color.
+            """
+            # Extract RGB values
+            R, G, B = color
+            
+            # Calculate lightness
+            max_rgb = max(R, G, B)
+            min_rgb = min(R, G, B)
+            lightness = (max_rgb + min_rgb) / 2
+            
+            return lightness
+        
+        # Function to calculate luminance
+        def luminance(color):
+            r, g, b = color
+            return 0.299 * r + 0.587 * g + 0.114 * b
+        
+        # Find the lightest and darkest colors
+        light1 = max(dominant_colors, key=luminance)
+        dark1 = min(dominant_colors, key=luminance)
+        
+        # for color in dominant_colors:
+        #     lightness_light1 = thief_lightness(light1)
+        #     lightness_dark1 = thief_lightness(dark1)
+        #     lightness_color = thief_lightness(color)
+        #     if lightness_color > lightness_light1:
+        #         dark1 = light1
+        #         light1 = color
+        #     if lightness_color < lightness_dark1:
+        #         dark1 = color
+        
+        # Select the 5th dominant color (index 4, since the list is 0-indexed)
+        fifth_dominant_color = dominant_colors[4]
+        
+        # Convert the RGB color to a hex format (ImageMagick uses hex codes)
+        hex_color = '#{:02x}{:02x}{:02x}'.format(*fifth_dominant_color)
+        rgb_color : tuple
+
+        
 
         hoffset, voffset = Util.compute_trimmed_offsets(Util.get_size(filename), (w, h))
+        
+        from PIL import Image
+        import io
+
+        def calculate_luminance_cropped(image_path, crop_box):
+            """
+            Calculate luminance for a cropped area of an image without saving to disk.
+            
+            Args:
+                image_path (str): Path to the original image.
+                crop_box (tuple): The cropping rectangle as (left, upper, right, lower).
+                
+            Returns:
+                tuple: Dominant color and luminance of the cropped area.
+            """
+            # Open the image using Pillow
+            with Image.open(image_path) as img:
+                # Crop the image
+                cropped_img = img.crop(crop_box)
+                # Save the cropped image to an in-memory buffer
+                buffer = io.BytesIO()
+                cropped_img.save(buffer, format="JPEG")
+                buffer.seek(0)  # Move to the beginning of the buffer
+            
+            # Use ColorThief to get the dominant color from the in-memory buffer
+            color_thief = ColorThief(buffer)
+            dominant_color = color_thief.get_color(quality=2)  # Returns (R, G, B)
+            
+            # Extract RGB values
+            R, G, B = dominant_color
+            
+            # Calculate lightness
+            max_rgb = max(R, G, B)
+            min_rgb = min(R, G, B)
+            lightness = (max_rgb + min_rgb) / 2  # Formula for lightness
+            
+            # Calculate luminance using Rec. 709 formula
+            luminance = 0.2126 * R + 0.7152 * G + 0.0722 * B
+            
+            return dominant_color, luminance, lightness
+
+        # Example usage
+        def calculate_crop_box(w, h, hoffset, voffset, crop_width=400, crop_height=170):
+            """
+            Calculate the crop box from bottom-left-based offsets.
+
+            Args:
+                w (int): Width of the image.
+                h (int): Height of the image.
+                hoffset (int): Horizontal offset from the bottom-left corner.
+                voffset (int): Vertical offset from the bottom-left corner.
+                crop_width (int): Width of the crop box (default 200).
+                crop_height (int): Height of the crop box (default 100).
+
+            Returns:
+                tuple: Crop box as (left, upper, right, lower).
+            """
+            # Convert bottom-left offsets to top-left origin coordinates
+            left = float(hoffset)
+            # upper = float(h) - (float(voffset) + crop_height)  # Convert voffset to top-left system
+            upper = float(voffset)
+            right = float(hoffset) + crop_width
+            # lower = float(h) - float(voffset)
+            lower = float(voffset + crop_height)
+
+            # Ensure the crop box is within image bounds
+            if left < 0 or upper < 0 or right > w or lower > h:
+                raise ValueError("Crop box is out of image bounds.")
+
+            return (left, upper, right, lower)
+        # image_path = "path/to/your/image.jpg"
+        crop_box = calculate_crop_box(w, h, 210, 450)  # Define the crop box (left, upper, right, lower)
+        logger.info(lambda: "Crop Box: " + str(crop_box))
+        try:
+            dominant_color, luminance, lightness = calculate_luminance_cropped(filename, crop_box)
+        except Exception:
+            lightness = 100
+        
+        logger.info(lambda: "Lightness: " + str(lightness))
+        
+        if lightness <= 127.5:
+            rgb_color = light1
+        else:
+            rgb_color = dark1
+            
+        hex_color = '#{:02x}{:02x}{:02x}'.format(*rgb_color)
+            
+        logger.info(lambda: "Colors: " + str(rgb_color))
+            
+        conky_config_path = '~/.config/conky/'
+        
+        # write the colors to a file
+        # with open(conky_config_path+'colors.txt', 'w') as f:
+        #     f.write(f'color={rgb_color}\n')
+        #     f.write(f'inverted_color={rgb_color}\n')
+        # test = (
+        # f"color=$(convert {shlex.quote(filename)} "
+        # f"-gravity SouthWest -crop 0x0+[%HOFFSET+60]+[%VOFFSET+110] -scale 1x1! -format \"%[pixel:u]\" info:) && "
+        # f"inverted_color=$(convert xc:\"$color\" -negate -format \"%[pixel:u]\" info:) && ")
+        # cmd = test + cmd
         clock_filter = self.options.clock_filter
+        clock_filter = cmd + clock_filter
         clock_filter = VarietyWindow.replace_clock_filter_offsets(clock_filter, hoffset, voffset)
         clock_filter = self.replace_clock_filter_fonts(clock_filter)
-
+        
+        clock_filter = clock_filter.replace("$inverted_color", hex_color)
+        
+        
+        
         clock_filter = time.strftime(
             clock_filter, time.localtime()
         )  # this should always be called last
         logger.info(lambda: "Applying clock filter: " + clock_filter)
+        
+        #  MSN Weather URL for your location
+        url = "https://www.msn.com/en-us/weather/forecast/in-Neu-Ulm,Bavaria?weadegreetype=C"
 
-        cmd += clock_filter
+        # Fetch the MSN Weather page
+        response = requests.get(url)
+        html_content = response.text
+
+        # Regex to extract temperature, feels-like temperature, and weather condition
+        regex = r'Condition_Card/([^"]+)\.svg.*?title="(-?\d+)°C.*?<!-- -->\s*(-?\d+)°'
+
+        # Search for matches
+        match = re.search(regex, html_content, re.DOTALL)
+        
+        def file_exists(filepath):
+            return os.path.isfile(filepath)
+
+        def download_and_convert(svgfile):
+            script_path = os.path.expanduser("~/.config/conky/")
+            svg_exist = os.path.join(script_path, 'WeatherIcons/msn/fallback/', f'{svgfile}.svg')
+
+            if not file_exists(svg_exist):
+                # Download the SVG file using requests
+                svg_url = f"https://assets.msn.com/weathermapdata/1/static/weather/Icons/taskbar_v10/Condition_Card/{svgfile}.svg"
+                temp_svg_path = os.path.join(script_path, 'WeatherIcons/msn/fallback/', f'{svgfile}.svg')
+                
+                response = requests.get(svg_url)
+                with open(temp_svg_path, 'wt') as file:
+                    file.write(response.text)
+                    
+                return temp_svg_path
+            
+            return svg_exist
+
+                # Convert the SVG to PNG using ImageMagick
+                # convert_command = ['inkscape', temp_svg_path, '--export-type=png','--export-filename='+ png_exist]
+                # subprocess.run(convert_command)
+
+                # Optionally, delete the temporary SVG file
+                # os.remove(temp_svg_path)
+            
+            # Copy the PNG file to /etc/conky/weather_icon.png
+            # shutil.copy(png_exist, os.path.join(script_path, 'weather_icon.png'))
+            
+        svgfile, temp, feel, weather_text, svg_path = "unknown", "unknown", "unknown", "unknown", "unknown"
+
+        if match:
+            svgfile, temp, feel = match.groups()
+            weather_text = f"{temp}°C, feels like {feel}°C"
+            svg_path = download_and_convert(svgfile)
+        
+        # clock_filter = re.sub(r"%s", svg_path, clock_filter, count=1)
+        # clock_filter = re.sub(r"%s", weather_text, clock_filter, count=1)
+        
+        clock_filter = re.sub(r"\[SVG\]", svg_path, clock_filter)
+        clock_filter = re.sub(r"\[WEATHER\]", weather_text, clock_filter)
+
+        cmd = clock_filter
         cmd += " "
         cmd += shlex.quote(target_file)
         logger.info(lambda: "ImageMagick clock cmd: " + cmd)
@@ -1475,6 +1695,8 @@ class VarietyWindow(Gtk.Window):
                 target_file = os.path.join(
                     self.wallpaper_folder, "wallpaper-clock-%s.jpg" % Util.random_hash()
                 )
+
+                # #**************************by ASHLEY
                 cmd = self.build_imagemagick_clock_cmd(to_set, target_file)
                 result = os.system(cmd)
                 if result == 0:  # success
@@ -1848,10 +2070,6 @@ class VarietyWindow(Gtk.Window):
             if self.options.min_rating_enabled:
                 rating = Util.get_rating(img)
                 if rating is None or rating <= 0 or rating < self.options.min_rating:
-                    return False
-
-            if self.options.name_regex_enabled:
-                if re.fullmatch(self.options.name_regex, os.path.basename(img)) is None:
                     return False
 
             if self.options.use_landscape_enabled or self.options.min_size_enabled:
@@ -2278,8 +2496,8 @@ class VarietyWindow(Gtk.Window):
                         last_version = f.read().strip()
                 except Exception:
                     last_version = (
-                        "0.4.12"  # this is the last release that did not have the .version file
-                    )
+                        "0.4.12"
+                    )  # this is the last release that did not have the .version file
 
             logger.info(
                 lambda: "Last run version was %s or earlier, current version is %s"
@@ -3193,3 +3411,4 @@ class VarietyWindow(Gtk.Window):
                 logger.exception("Could not start slideshow:")
 
         threading.Thread(target=_go).start()
+        
